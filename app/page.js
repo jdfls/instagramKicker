@@ -40,6 +40,7 @@ export default function HomePage() {
         >
           Go to /open test
         </a>
+        <a href="/tap" style={{display:'inline-block',marginTop:'8px',marginLeft:'8px',padding:'12px 18px',borderRadius:'10px',textDecoration:'none',background:'#2563eb',color:'#fff',fontWeight:600}}>Go to /tap test</a>
       </div>
     </main>
   );

@@ -1,118 +1,82 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { attachEventLogging, buildDebugReport, clearLogs, copyReport, detectEnvironment, downloadReport, queryObject, readLogs, writeLog } from '../debugUtils';
 
 export default function OpenPage() {
-  const [ua, setUa] = useState('');
-  const [isInstagram, setIsInstagram] = useState(false);
-  const [isIos, setIsIos] = useState(false);
+  const [env, setEnv] = useState({});
+  const [logs, setLogs] = useState([]);
+  const [status, setStatus] = useState('Starting automatic redirect sequence...');
+  const [attemptId] = useState(() => Math.random().toString(36).slice(2, 10));
 
-  const finalUrl = useMemo(() => {
-    if (typeof window === 'undefined') return '/final';
-    return `${window.location.origin}/final`;
-  }, []);
+  const finalBase = useMemo(() => (typeof window === 'undefined' ? '/final' : `${window.location.origin}/final`), []);
 
-  const attemptSafariHandoff = () => {
-    const finalUrlWithoutProtocol = finalUrl.replace(/^https?:\/\//, '');
+  const buildTarget = (method, mode = 'x-safari', from = 'open') => {
+    const e = detectEnvironment();
+    const finalUrl = new URL(finalBase);
+    finalUrl.searchParams.set('method', method);
+    finalUrl.searchParams.set('from', from);
+    finalUrl.searchParams.set('attemptId', attemptId);
+    finalUrl.searchParams.set('t', String(Date.now()));
+    finalUrl.searchParams.set('uaIg', String(Boolean(e?.detected?.instagram)));
+    finalUrl.searchParams.set('ios', String(Boolean(e?.detected?.ios)));
+    return mode === 'x-safari' ? `x-safari-https://${finalUrl.href.replace(/^https?:\/\//, '')}` : finalUrl.href;
+  };
 
-    // Instagram in-app browser on iOS may honor the x-safari-https scheme,
-    // which can hand off to Safari (or the default external browser setup).
-    window.location.href = `x-safari-https://${finalUrlWithoutProtocol}`;
+  const redirectAttempt = (method, behavior = 'href', mode = 'x-safari') => {
+    const url = buildTarget(method, mode);
+    writeLog({ type: 'redirect_attempt', method, behavior, mode, url, userActivation: navigator.userActivation ? { hasBeenActive: navigator.userActivation.hasBeenActive, isActive: navigator.userActivation.isActive } : null });
+    if (behavior === 'replace') window.location.replace(url);
+    else if (behavior === 'anchor') {
+      const a = document.createElement('a'); a.href = url; a.rel = 'noopener'; document.body.appendChild(a); a.click(); a.remove();
+    } else if (behavior === 'open') window.open(url, '_blank');
+    else if (behavior === 'delayed') setTimeout(() => { window.location.href = url; }, 250);
+    else window.location.href = url;
   };
 
   useEffect(() => {
-    const currentUa = navigator.userAgent;
-    const instagramDetected = navigator.userAgent.includes('Instagram');
-    const iosDetected = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+    const teardown = attachEventLogging();
+    writeLog({ type: 'page_loaded', page: '/open' });
+    const snapshot = detectEnvironment();
+    setEnv(snapshot);
+    writeLog({ type: 'env', env: snapshot });
 
-    setUa(currentUa);
-    setIsInstagram(instagramDetected);
-    setIsIos(iosDetected);
+    const timers = [];
+    const schedule = (ms, fn) => timers.push(setTimeout(fn, ms));
 
-    if (instagramDetected && iosDetected) {
-      // Delay slightly so the page can paint debug information
-      // before attempting the handoff.
-      const timer = setTimeout(() => {
-        attemptSafariHandoff();
-      }, 300);
-      return () => clearTimeout(timer);
-    }
+    schedule(0, () => redirectAttempt('auto-0'));
+    schedule(100, () => { writeLog({ type: 'auto_check', note: 'auto-0 did not leave by 100ms' }); redirectAttempt('auto-100'); });
+    schedule(300, () => { writeLog({ type: 'auto_check', note: 'auto-100 did not leave by 300ms' }); redirectAttempt('auto-300'); });
+    schedule(800, () => { writeLog({ type: 'auto_check', note: 'auto-300 did not leave by 800ms' }); redirectAttempt('auto-800'); });
+    schedule(1500, () => { writeLog({ type: 'auto_check', note: 'auto-800 did not leave by 1500ms' }); setStatus('Automatic redirect likely failed/was blocked'); setLogs(readLogs()); });
 
-    // If this is not Instagram on iOS, do a normal same-origin redirect.
-    window.location.href = finalUrl;
-  }, [finalUrl]);
+    const poll = setInterval(() => setLogs(readLogs()), 300);
+    return () => { teardown(); timers.forEach(clearTimeout); clearInterval(poll); };
+  }, []);
 
-  return (
-    <main
-      style={{
-        minHeight: '100vh',
-        padding: '20px',
-        fontFamily: 'system-ui, -apple-system, Segoe UI, Roboto, sans-serif',
-        background: '#f8fafc',
-      }}
-    >
-      <div
-        style={{
-          maxWidth: '680px',
-          margin: '0 auto',
-          background: '#fff',
-          border: '1px solid #e5e7eb',
-          borderRadius: '12px',
-          padding: '16px',
-        }}
-      >
-        <h1 style={{ marginTop: 0 }}>Open Page</h1>
-        <p>Debug info is shown below before redirect attempts.</p>
+  const report = buildDebugReport({ pageRole: 'open', status, env, query: queryObject() });
 
-        <div style={{ fontSize: '14px', lineHeight: 1.6 }}>
-          <p>
-            <strong>isInstagram:</strong> {String(isInstagram)}
-          </p>
-          <p>
-            <strong>isIos:</strong> {String(isIos)}
-          </p>
-          <p>
-            <strong>finalUrl:</strong> {finalUrl}
-          </p>
-          <p>
-            <strong>userAgent:</strong>
-          </p>
-          <pre
-            style={{
-              whiteSpace: 'pre-wrap',
-              wordBreak: 'break-word',
-              background: '#f1f5f9',
-              padding: '10px',
-              borderRadius: '8px',
-              marginTop: 0,
-            }}
-          >
-            {ua || 'Loading...'}
-          </pre>
-        </div>
-
-        <button
-          onClick={attemptSafariHandoff}
-          style={{
-            width: '100%',
-            marginTop: '12px',
-            minHeight: '56px',
-            border: 'none',
-            borderRadius: '10px',
-            background: '#2563eb',
-            color: '#fff',
-            fontSize: '18px',
-            fontWeight: 700,
-          }}
-        >
-          Try opening in external browser
-        </button>
-
-        <p style={{ marginTop: '12px' }}>
-          If this does not open, tap the three dots in Instagram and choose Open in
-          browser.
-        </p>
+  return (<main style={{minHeight:'100vh',padding:20,fontFamily:'system-ui',background:'#f8fafc'}}>
+    <div style={{maxWidth:760,margin:'0 auto',background:'#fff',border:'1px solid #e5e7eb',borderRadius:12,padding:16}}>
+      <h1>/open diagnostics</h1><p>{status}</p>
+      <p><strong>attemptId:</strong> {attemptId}</p>
+      <div style={{display:'grid',gap:8}}>
+        <button onClick={() => redirectAttempt('button','href','x-safari')} style={{minHeight:52,fontSize:18}}>Try x-safari redirect</button>
+        <button onClick={() => redirectAttempt('normal','href','https')} style={{minHeight:52,fontSize:18}}>Try normal https redirect</button>
+        <button onClick={() => redirectAttempt('button','replace','x-safari')} style={{minHeight:52,fontSize:18}}>Try location.replace x-safari</button>
+        <button onClick={() => redirectAttempt('button','anchor','x-safari')} style={{minHeight:52,fontSize:18}}>Try anchor click x-safari</button>
+        <button onClick={() => redirectAttempt('button','open','x-safari')} style={{minHeight:52,fontSize:18}}>Try window.open x-safari</button>
+        <button onClick={() => redirectAttempt('tap','delayed','x-safari')} style={{minHeight:52,fontSize:18}}>Try delayed redirect after tap</button>
       </div>
-    </main>
-  );
+      <p><a href="/tap">Go to /tap for gesture-only testing</a></p>
+      <div style={{display:'flex',gap:8,margin:'12px 0'}}>
+        <button onClick={() => copyReport(report)}>Copy Debug Report</button>
+        <button onClick={() => downloadReport(report, 'open-debug.json')}>Download Debug JSON</button>
+        <button onClick={() => { clearLogs(); setLogs([]); }}>Clear Debug Logs</button>
+      </div>
+      <pre style={{whiteSpace:'pre-wrap',background:'#f1f5f9',padding:10,borderRadius:8}}>{JSON.stringify(env,null,2)}</pre>
+      <h3>Session logs</h3>
+      <pre style={{whiteSpace:'pre-wrap',background:'#f8fafc',padding:10,borderRadius:8,maxHeight:260,overflow:'auto'}}>{JSON.stringify(logs,null,2)}</pre>
+    </div>
+  </main>);
 }
