@@ -18,7 +18,7 @@ export default function TapPage() {
 
   const buildTargets = (method, mode = 'x-safari') => {
     const env = detectEnvironment();
-    const u = new URL(finalBase);
+    const u = new URL(finalBase, typeof window === 'undefined' ? 'https://debug.local' : window.location.origin);
     u.searchParams.set('method', method);
     u.searchParams.set('mode', mode);
     u.searchParams.set('from', 'tap');

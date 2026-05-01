@@ -13,7 +13,7 @@ export default function OpenPage() {
 
   const buildTargets = (method, mode = 'x-safari', from = 'open') => {
     const e = detectEnvironment();
-    const finalUrl = new URL(finalBase);
+    const finalUrl = new URL(finalBase, typeof window === 'undefined' ? 'https://debug.local' : window.location.origin);
     finalUrl.searchParams.set('method', method);
     finalUrl.searchParams.set('mode', mode);
     finalUrl.searchParams.set('from', from);
