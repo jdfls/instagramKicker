@@ -84,6 +84,20 @@ export function queryObject() {
 }
 
 export function buildDebugReport(extra = {}) {
+  if (typeof window === 'undefined') {
+    return {
+      page: null,
+      url: null,
+      query: {},
+      env: {},
+      logs: [],
+      timing: {
+        now: Date.now(),
+        performanceNow: null,
+      },
+      ...extra,
+    };
+  }
   const env = detectEnvironment();
   return {
     page: window.location.pathname,
